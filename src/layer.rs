@@ -1,17 +1,28 @@
-
 use helixlauncher_core::launch::instance;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, collections::VecDeque};
+use std::{collections::VecDeque, path::PathBuf};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct Profile {
     pub layers: Vec<Layer>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(remote = "instance::Modloader")]
+#[serde(rename_all = "lowercase")]
+pub enum ModloaderDef {
+    Quilt,
+    Fabric,
+    Forge,
+    Vanilla,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub enum Layer {
     Instance {
         version: String,
+        #[serde(with = "ModloaderDef")]
         loader: instance::Modloader,
         loader_version: Option<String>,
     },
@@ -22,7 +33,7 @@ pub enum Layer {
         id: String,
         version: Option<String>,
     },
-    Variants (Vec<Layer>),
+    Variants(Vec<Layer>),
     IfPresent {
         check_for: ResolvedLayer,
         include: Box<Layer>,
@@ -33,10 +44,11 @@ pub enum Layer {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
 pub enum ResolvedLayer {
     Instance {
         version: String,
+        #[serde(with = "ModloaderDef")]
         loader: instance::Modloader,
         loader_version: Option<String>,
     },
@@ -65,7 +77,7 @@ impl Layer {
                 vec![ResolvedLayer::DirectoryOverlay { source: source }]
             }
             Self::ModrinthPack { id, version } => vec![ResolvedLayer::ModrinthPack { id, version }],
-            Self::Variants (variants) => variants
+            Self::Variants(variants) => variants
                 .into_iter()
                 .flat_map(|e| e.resolve(previous_layers))
                 .collect(),

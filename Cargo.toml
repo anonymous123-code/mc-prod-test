@@ -9,6 +9,7 @@ edition = "2021"
 clap = { version = "4.3.8", features = ["derive"] }
 dialoguer = "0.10.4"
 helixlauncher-core = { git="https://github.com/HelixLauncher/HelixLauncher" }
+schemars = "0.8.12"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.99"
 tokio = { version = "1.28.2", features = ["full"] }

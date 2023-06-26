@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fs, io, path::PathBuf};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ProfileConfig {
     pub profiles: HashMap<String, crate::layer::Profile>,
 

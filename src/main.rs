@@ -36,6 +36,13 @@ fn main() {
         Subcommands::Create { name } => create_cmd(name, &mut config),
         Subcommands::Add {} => {}
         Subcommands::Switch { name } => switch_cmd(name, &mut config),
+        Subcommands::Schema => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&schemars::schema_for!(config::ProfileConfig))
+                    .unwrap()
+            )
+        }
     }
 }
 
@@ -159,4 +166,5 @@ enum Subcommands {
     Create { name: Option<String> },
     Add {},
     Switch { name: Option<String> },
+    Schema,
 }
