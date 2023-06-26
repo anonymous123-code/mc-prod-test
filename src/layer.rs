@@ -19,6 +19,7 @@ pub enum ModloaderDef {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all="snake_case")]
 pub enum Layer {
     Instance {
         version: String,
@@ -45,6 +46,7 @@ pub enum Layer {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all="snake_case")]
 pub enum ResolvedLayer {
     Instance {
         version: String,
