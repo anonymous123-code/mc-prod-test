@@ -27,7 +27,12 @@ fn main() {
                 },
             };
             if config.profiles.contains_key(&name) {
-                config.profiles.get(&name).unwrap().clone().print_tree();
+                config
+                    .profiles
+                    .get(&name)
+                    .unwrap()
+                    .clone()
+                    .apply_to_all_variants(|layers| println!("{layers:?}"));
                 println!("Successfully failed to run {}", name)
             } else {
                 panic!("This profile does not exist")

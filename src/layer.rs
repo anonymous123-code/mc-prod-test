@@ -19,7 +19,7 @@ pub enum ModloaderDef {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum Layer {
     Instance {
         version: String,
@@ -47,7 +47,7 @@ pub enum Layer {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ResolvedLayer {
     Instance {
         version: String,
@@ -105,21 +105,33 @@ impl Layer {
 }
 
 impl Profile {
-    pub fn print_tree(self) {
-        Self::print_tree_rec(&[], &mut self.layers.into())
+    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer]) -> B, B>(self, apply: F) -> Vec<B> {
+        Self::apply_to_all_variants_rec(&[], &mut self.layers.into(), &apply)
     }
 
-    fn print_tree_rec(prev: &[ResolvedLayer], coming: &mut VecDeque<Layer>) {
+    fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer]) -> B, B>(
+        prev: &[ResolvedLayer],
+        coming: &mut VecDeque<Layer>,
+        apply: &F,
+    ) -> Vec<B> {
         if coming.len() == 0 {
-            println!("{prev:?}");
-            return;
+            return vec![apply(prev)];
         }
+
         let mut resolved = coming.pop_front().unwrap().resolve(prev);
         while resolved.len() == 0 {
             resolved = coming.pop_front().unwrap().resolve(prev);
         }
-        for resolved_layer in resolved {
-            Self::print_tree_rec(&[prev, &[resolved_layer]].concat(), &mut coming.clone())
-        }
+
+        resolved
+            .into_iter()
+            .flat_map(|resolved_layer| {
+                Self::apply_to_all_variants_rec(
+                    &[prev, &[resolved_layer]].concat(),
+                    &mut coming.clone(),
+                    apply,
+                )
+            })
+            .collect()
     }
 }
