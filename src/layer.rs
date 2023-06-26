@@ -34,6 +34,7 @@ pub enum Layer {
         id: String,
         version: Option<String>,
     },
+    ExecuteCommand(String),
     Variants(Vec<Layer>),
     IfPresent {
         check_for: ResolvedLayer,
@@ -61,6 +62,7 @@ pub enum ResolvedLayer {
         id: String,
         version: Option<String>,
     },
+    ExecuteCommand(String),
 }
 
 impl Layer {
@@ -79,6 +81,7 @@ impl Layer {
                 vec![ResolvedLayer::DirectoryOverlay { source: source }]
             }
             Self::ModrinthPack { id, version } => vec![ResolvedLayer::ModrinthPack { id, version }],
+            Self::ExecuteCommand(command) => vec![ResolvedLayer::ExecuteCommand(command)],
             Self::Variants(variants) => variants
                 .into_iter()
                 .flat_map(|e| e.resolve(previous_layers))
