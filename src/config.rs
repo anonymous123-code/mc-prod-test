@@ -11,7 +11,7 @@ pub struct ProfileConfig {
     pub active_config: Option<String>,
 
     #[serde(skip)]
-    path: PathBuf,
+    pub path: PathBuf,
 }
 
 impl ProfileConfig {
