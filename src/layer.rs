@@ -44,6 +44,10 @@ pub enum Layer {
         id: String,
         version: Option<String>,
     },
+    LaunchClient {
+        account_name: Option<String>,
+        world_name: Option<String>,
+    },
     ExecuteCommand(String),
     Variants(Vec<Layer>),
     IfPresent {
@@ -74,6 +78,10 @@ pub enum ResolvedLayer {
         version: Option<String>,
     },
     ExecuteCommand(String),
+    LaunchClient {
+        account_name: Option<String>,
+        world_name: Option<String>,
+    },
 }
 
 impl Layer {
@@ -94,6 +102,13 @@ impl Layer {
             }
             Self::ModrinthPack { id, version } => vec![ResolvedLayer::ModrinthPack { id, version }],
             Self::ExecuteCommand(command) => vec![ResolvedLayer::ExecuteCommand(command)],
+            Self::LaunchClient {
+                account_name,
+                world_name,
+            } => vec![ResolvedLayer::LaunchClient {
+                account_name,
+                world_name,
+            }],
             Self::Variants(variants) => variants
                 .into_iter()
                 .flat_map(|e| e.resolve(previous_layers))
@@ -117,21 +132,31 @@ impl Layer {
 }
 
 impl Profile {
-    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer], String) -> B, B>(self, apply: F, name: String) -> Vec<B> {
+    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer], String) -> B, B>(
+        self,
+        apply: F,
+        name: String,
+    ) -> Vec<B> {
         Self::apply_to_all_variants_rec(&[], &mut self.layers.into(), name, &apply)
     }
 
     pub fn run(self, base_directory: PathBuf) {
         let name = self.name.clone() + "_";
-        self.apply_to_all_variants(|resolved_layers, name| {
-            let mut instance = Either::Second(base_directory.join(name));
-            for resolved in resolved_layers {
-                match resolved.apply(&instance).expect("Error while running profile") {
-                    Some(new_instance) => instance = Either::First(new_instance),
-                    _ => {}
+        self.apply_to_all_variants(
+            |resolved_layers, name| {
+                let mut instance = Either::Second(base_directory.join(name));
+                for resolved in resolved_layers {
+                    match resolved
+                        .apply(&instance)
+                        .expect("Error while running profile")
+                    {
+                        Some(new_instance) => instance = Either::First(new_instance),
+                        _ => {}
+                    }
                 }
-            }
-        }, name);
+            },
+            name,
+        );
     }
 
     fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer], String) -> B, B>(
@@ -180,24 +205,22 @@ impl ResolvedLayer {
                     fs::remove_dir_all(path)?;
                 }
                 Ok(None)
-            },
+            }
             Self::Instance {
                 version,
                 loader,
                 loader_version,
-            } => {
-                Ok(Some(
-                    instance::Instance::new(
-                        path.file_name().unwrap().to_string_lossy().to_string(),
-                        version.clone(),
-                        instance::InstanceLaunchConfig::default(),
-                        path.parent().unwrap(),
-                        *loader,
-                        loader_version.clone(),
-                    )
-                    .unwrap(),
-                ))
-            }
+            } => Ok(Some(
+                instance::Instance::new(
+                    path.file_name().unwrap().to_string_lossy().to_string(),
+                    version.clone(),
+                    instance::InstanceLaunchConfig::default(),
+                    path.parent().unwrap(),
+                    *loader,
+                    loader_version.clone(),
+                )
+                .unwrap(),
+            )),
             Self::DirectoryOverlay { source } => {
                 copy_dir_all(path.join(source), path)?;
                 Ok(None)
@@ -210,6 +233,20 @@ impl ResolvedLayer {
             }
             Self::ModrinthPack { id: _, version: _ } => {
                 todo!("Modpack support")
+            }
+            Self::LaunchClient {
+                account_name: _,
+                world_name: _,
+            } => {
+                todo!();
+                /*
+                match instance {
+                    Either::First(instance) => {
+                        join!(prepared::prepare_launch(Config::new(appid, name), instance, components, launch_options).await);
+                        Ok(None)
+                    }
+                    Either::Second(_) => Err()
+                }*/
             }
         };
 
