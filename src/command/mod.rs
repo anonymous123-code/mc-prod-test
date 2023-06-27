@@ -10,10 +10,19 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) {
         Some(name) => name,
         None => match config.active_config {
             Some(name) => name,
-            None => dialoguer::Input::new()
-                .with_prompt("Enter profile name")
-                .interact_text()
-                .expect("Error while interactively prompting profile name: "),
+            None => {
+                let options: Vec<String> = config.profiles.clone().into_keys().collect();
+                let index = match dialoguer::FuzzySelect::new()
+                    .with_prompt("Select profile")
+                    .items(&options)
+                    .interact_opt()
+                    .expect("Error while interactively prompting profile name: ")
+                {
+                    Some(index) => index,
+                    _ => return,
+                };
+                options.get(index).unwrap().to_owned()
+            }
         },
     };
     if config.profiles.contains_key(&name) {
@@ -30,7 +39,6 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) {
         panic!("This profile does not exist")
     }
 }
-
 
 pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
     let name = match name {
@@ -72,7 +80,10 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
             instance::Modloader::Fabric,
             instance::Modloader::Forge,
         ];
-        match dialoguer::Select::new().items(&modloaders).interact_opt() {
+        match dialoguer::FuzzySelect::new()
+            .items(&modloaders)
+            .interact_opt()
+        {
             Ok(Some(index)) => match modloaders[index] {
                 instance::Modloader::Vanilla => {}
                 loader => {
@@ -114,7 +125,7 @@ pub async fn switch(name: Option<String>, config: &mut ProfileConfig) {
         }
         None => {
             let options: Vec<String> = config.profiles.clone().into_keys().collect();
-            let dialog = dialoguer::Select::new()
+            let dialog = dialoguer::FuzzySelect::new()
                 .with_prompt("Select profile")
                 .item("Clear selected profile, will require re-selecting or manually specifying the profile each run")
                 .items(&options)

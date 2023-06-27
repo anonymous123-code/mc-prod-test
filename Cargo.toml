@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.3.8", features = ["derive"] }
-dialoguer = "0.10.4"
+dialoguer = { version = "0.10.4", features = ["fuzzy-select", "history"] }
 helixlauncher-core = { git="https://github.com/HelixLauncher/HelixLauncher" }
 schemars = "0.8.12"
 serde = { version = "1.0.164", features = ["derive"] }

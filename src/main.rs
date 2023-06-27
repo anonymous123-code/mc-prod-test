@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf};
 
-mod config;
 mod command;
+mod config;
 pub mod layer;
 
 use clap::{Parser, Subcommand};
