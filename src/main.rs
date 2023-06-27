@@ -27,12 +27,16 @@ fn main() {
                 },
             };
             if config.profiles.contains_key(&name) {
-                config
+                let profile = config
                     .profiles
-                    .get(&name)
-                    .unwrap()
-                    .clone()
-                    .apply_to_all_variants(|layers| println!("{layers:?}"));
+                    .get_mut(&name)
+                    .unwrap();
+                profile.name = name.clone();
+                profile.clone()
+                    .apply_to_all_variants(|layers, _| println!("{layers:?}"), "".to_string());
+
+                profile.clone()
+                    .run(profile_dir.join(&profile.name));
                 println!("Successfully failed to run {}", name)
             } else {
                 panic!("This profile does not exist")
@@ -62,7 +66,7 @@ fn create_cmd(name: Option<String>, config: &mut ProfileConfig) {
     if config.profiles.contains_key(&name) {
         panic!("Profile already exists")
     }
-    let mut new_profile = Profile { layers: vec![] };
+    let mut new_profile = Profile { layers: vec![], name: name.clone() };
     if match dialoguer::Confirm::new()
         .with_prompt("Generate minecraft and mod loader layers?")
         .interact_opt()

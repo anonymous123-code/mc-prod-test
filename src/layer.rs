@@ -1,10 +1,19 @@
 use helixlauncher_core::launch::instance;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    error::Error,
+    fmt::Display,
+    fs, io,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct Profile {
+    #[serde(skip)]
+    pub name: String,
     pub layers: Vec<Layer>,
 }
 
@@ -105,17 +114,31 @@ impl Layer {
 }
 
 impl Profile {
-    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer]) -> B, B>(self, apply: F) -> Vec<B> {
-        Self::apply_to_all_variants_rec(&[], &mut self.layers.into(), &apply)
+    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer], String) -> B, B>(self, apply: F, name: String) -> Vec<B> {
+        Self::apply_to_all_variants_rec(&[], &mut self.layers.into(), name, &apply)
     }
 
-    fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer]) -> B, B>(
+    pub fn run(self, base_directory: PathBuf) {
+        let name = self.name.clone() + "_";
+        self.apply_to_all_variants(|resolved_layers, name| {
+            let mut instance = Either::Second(base_directory.join(name));
+            for resolved in resolved_layers {
+                match resolved.apply(&instance).expect("Error while running profile") {
+                    Some(new_instance) => instance = Either::First(new_instance),
+                    _ => {}
+                }
+            }
+        }, name);
+    }
+
+    fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer], String) -> B, B>(
         prev: &[ResolvedLayer],
         coming: &mut VecDeque<Layer>,
+        name: String,
         apply: &F,
     ) -> Vec<B> {
         if coming.len() == 0 {
-            return vec![apply(prev)];
+            return vec![apply(prev, name)];
         }
 
         let mut resolved = coming.pop_front().unwrap().resolve(prev);
@@ -125,13 +148,108 @@ impl Profile {
 
         resolved
             .into_iter()
-            .flat_map(|resolved_layer| {
+            .enumerate()
+            .flat_map(|(index, resolved_layer)| {
                 Self::apply_to_all_variants_rec(
                     &[prev, &[resolved_layer]].concat(),
                     &mut coming.clone(),
+                    format!("{name}{index:02}"),
                     apply,
                 )
             })
             .collect()
     }
 }
+
+impl ResolvedLayer {
+    pub fn apply(
+        &self,
+        instance: &Either<instance::Instance, PathBuf>,
+    ) -> Result<Option<instance::Instance>, Box<dyn Error>> {
+        return match self {
+            Self::Instance {
+                version,
+                loader,
+                loader_version,
+            } => {
+                let path = match instance {
+                    Either::First(instance) => &instance.path,
+                    Either::Second(path) => path,
+                };
+                Ok(Some(
+                    instance::Instance::new(
+                        path.file_name().unwrap().to_string_lossy().to_string(),
+                        version.clone(),
+                        instance::InstanceLaunchConfig::default(),
+                        path.parent().unwrap(),
+                        *loader,
+                        loader_version.clone(),
+                    )
+                    .unwrap(),
+                ))
+            }
+            Self::DirectoryOverlay { source } => {
+                let path = match instance {
+                    Either::First(instance) => &instance.path,
+                    Either::Second(path) => path,
+                };
+                copy_dir_all(path.join(source), path)?;
+                Ok(None)
+            }
+            Self::ExecuteCommand(cmd) => {
+                if run_cmd(cmd).status.success() {
+                    return Ok(None);
+                }
+                return Err(EvaluationError {})?;
+            }
+            Self::ModrinthPack { id: _, version: _ } => {
+                todo!("Modpack support")
+            }
+        };
+
+        fn run_cmd(cmd: &String) -> Output {
+            if cfg!(target_os = "windows") {
+                Command::new("cmd")
+                    .args(["/C", cmd])
+                    .output()
+                    .expect("failed to execute process")
+            } else {
+                Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .output()
+                    .expect("failed to execute process")
+            }
+        }
+        fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
+            fs::create_dir_all(&dst)?;
+            for entry in fs::read_dir(src)? {
+                let entry = entry?;
+                let ty = entry.file_type()?;
+                if ty.is_dir() {
+                    copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+                } else {
+                    fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+pub enum Either<T, U> {
+    First(T),
+    Second(U),
+}
+
+#[derive(Debug)]
+pub struct EvaluationError {}
+
+impl Display for EvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EvaluationError")?;
+        Ok(())
+    }
+}
+
+impl Error for EvaluationError {}
