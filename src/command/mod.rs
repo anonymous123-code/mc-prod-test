@@ -1,10 +1,11 @@
 use crate::config::ProfileConfig;
 use crate::layer;
+use anyhow::{Context, Ok, Result, bail};
 use helixlauncher_core::launch::instance;
 
 use crate::layer::Profile;
 
-pub async fn run(name: Option<String>, mut config: ProfileConfig) {
+pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> {
     let profile_dir = config.path.parent().unwrap();
     let name = match name {
         Some(name) => name,
@@ -16,40 +17,44 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) {
                     .with_prompt("Select profile")
                     .items(&options)
                     .interact_opt()
-                    .expect("Error while interactively prompting profile name: ")
+                    .context("Error while prompting profile name")?
                 {
                     Some(index) => index,
-                    _ => return,
+                    _ => return Ok(()),
                 };
                 options.get(index).unwrap().to_owned()
             }
         },
     };
-    if config.profiles.contains_key(&name) {
-        let profile = config.profiles.get_mut(&name).unwrap();
+    let profile = config
+        .profiles
+        .get_mut(&name)
+        .context("Profile does not exist")?;
 
-        profile.name = name.clone();
-        profile
-            .clone()
-            .apply_to_all_variants(|layers, _| println!("{layers:?}"), "".to_string());
+    profile.name = name.clone();
+    profile.clone().apply_to_all_variants(
+        |layers, _| {
+            println!("{layers:?}");
+            Ok(())
+        },
+        "".to_string(),
+    )?;
 
-        profile.clone().run(profile_dir.join(&profile.name));
-        println!("Successfully ran {}", name)
-    } else {
-        panic!("This profile does not exist")
-    }
+    profile.clone().run(profile_dir.join(&profile.name))?;
+    println!("Successfully ran {}", name);
+    return Ok(());
 }
 
-pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
+pub async fn create(name: Option<String>, config: &mut ProfileConfig) -> Result<()> {
     let name = match name {
         Some(name) => name,
         None => dialoguer::Input::new()
             .with_prompt("Enter profile name")
             .interact_text()
-            .expect("Error while interactively prompting profile name: "),
+            .context("Error while rompting profile name")?,
     };
     if config.profiles.contains_key(&name) {
-        panic!("Profile already exists")
+        bail!("Profile already exists");
     }
     let mut new_profile = Profile {
         layers: vec![],
@@ -59,8 +64,8 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
         .with_prompt("Generate minecraft and mod loader layers?")
         .interact_opt()
     {
-        Ok(Some(value)) => value,
-        Ok(None) => return,
+        core::result::Result::Ok(Some(value)) => value,
+        core::result::Result::Ok(None) => return Ok(()),
         Err(err) => {
             eprintln!("Unable to prompt wether to generate default layers: {err}, assuming no");
             false
@@ -70,7 +75,7 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
             version: dialoguer::Input::new()
                 .with_prompt("Minecraft Version")
                 .interact_text()
-                .expect("Unable to prompt minecraft version"),
+                .context("Unable to prompt minecraft version")?,
             loader: instance::Modloader::Vanilla,
             loader_version: None,
         };
@@ -83,8 +88,9 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
         match dialoguer::FuzzySelect::new()
             .items(&modloaders)
             .interact_opt()
+            .context("Unable to prompt mod loader")?
         {
-            Ok(Some(index)) => match modloaders[index] {
+            Some(index) => match modloaders[index] {
                 instance::Modloader::Vanilla => {}
                 loader => {
                     if let layer::Layer::Instance { version, .. } = instance {
@@ -95,7 +101,7 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
                                 dialoguer::Input::new()
                                     .with_prompt(format!("Select {loader} version"))
                                     .interact_text()
-                                    .unwrap(),
+                                    .context("Unable to prompt loader version")?,
                             ),
                         };
                     } else {
@@ -103,24 +109,24 @@ pub async fn create(name: Option<String>, config: &mut ProfileConfig) {
                     }
                 }
             },
-            Ok(None) => return,
-            Err(err) => Err(err).expect("Unable to prompt mod loader"),
+            None => return Ok(()),
         }
         new_profile.layers.push(instance);
     }
     config.profiles.insert(name.clone(), new_profile);
-    config.safe();
+    config.safe()?;
     println!("Profile {} was created", name);
+    Ok(())
 }
 
-pub async fn switch(name: Option<String>, config: &mut ProfileConfig) {
+pub async fn switch(name: Option<String>, config: &mut ProfileConfig) -> Result<()> {
     match name {
         Some(string) => {
             if config.profiles.contains_key(&string) {
                 config.active_config = Some(string);
-                config.safe();
+                config.safe()?;
             } else {
-                panic!("This profile does not exist")
+                bail!("This profile does not exist");
             }
         }
         None => {
@@ -130,19 +136,20 @@ pub async fn switch(name: Option<String>, config: &mut ProfileConfig) {
                 .item("Clear selected profile, will require re-selecting or manually specifying the profile each run")
                 .items(&options)
                 .default(0)
-                .interact_opt().expect("Profile selection doesnt work");
+                .interact_opt().context("Profile selection doesnt work")?;
 
             match dialog {
                 Some(0) => {
                     config.active_config = None;
-                    config.safe();
+                    config.safe()?;
                 }
                 Some(index) => {
                     config.active_config = Some(options.get(index - 1).unwrap().to_owned());
-                    config.safe();
+                    config.safe()?;
                 }
                 _ => {}
             }
         }
     }
+    Ok(())
 }

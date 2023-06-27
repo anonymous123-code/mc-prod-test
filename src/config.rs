@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fs, io, path::PathBuf};
 
+use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,12 +16,13 @@ pub struct ProfileConfig {
 }
 
 impl ProfileConfig {
-    pub fn read_or_create(path: PathBuf) -> Self {
+    pub fn read_or_create(path: PathBuf) -> Result<Self> {
         match fs::read_to_string(&path) {
             Ok(content) => {
-                let mut it = Self::from(content.as_str()).expect("Profile config format invalid");
+                let mut it =
+                    Self::from(content.as_str()).context("Profile config format invalid")?;
                 it.path = path;
-                it
+                Ok(it)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 fs::write(
@@ -32,20 +34,20 @@ impl ProfileConfig {
                     })
                     .unwrap(),
                 )
-                .expect("Could not find or create config file");
-                Self {
+                .context("Unable to create config file")?;
+                Ok(Self {
                     profiles: HashMap::new(),
                     active_config: None,
                     path,
-                }
+                })
             }
-            Err(e) => Err(e).expect("Could not read or create config file"),
+            Err(e) => Err(e).context("Could not read or create config file"),
         }
     }
 
-    pub fn safe(&self) {
+    pub fn safe(&self) -> Result<()> {
         fs::write(&self.path, serde_json::to_string_pretty(self).unwrap())
-            .expect("Error saving config, state might be broken");
+            .context("Error saving config, state might be broken")
     }
 
     fn from(s: &str) -> serde_json::Result<Self> {

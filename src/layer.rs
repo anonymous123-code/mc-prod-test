@@ -1,3 +1,4 @@
+use anyhow::{Context, Ok, Result};
 use helixlauncher_core::launch::instance;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,7 @@ use std::{
     collections::VecDeque,
     error::Error,
     fmt::Display,
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -132,15 +133,15 @@ impl Layer {
 }
 
 impl Profile {
-    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer], String) -> B, B>(
+    pub fn apply_to_all_variants<F: Fn(&[ResolvedLayer], String) -> Result<B>, B>(
         self,
         apply: F,
         name: String,
-    ) -> Vec<B> {
+    ) -> Result<Vec<B>> {
         Self::apply_to_all_variants_rec(&[], &mut self.layers.into(), name, &apply)
     }
 
-    pub fn run(self, base_directory: PathBuf) {
+    pub fn run(self, base_directory: PathBuf) -> Result<()> {
         let name = self.name.clone() + "_";
         self.apply_to_all_variants(
             |resolved_layers, name| {
@@ -148,36 +149,38 @@ impl Profile {
                 for resolved in resolved_layers {
                     match resolved
                         .apply(&instance)
-                        .expect("Error while running profile")
+                        .context("Error while running profile")?
                     {
                         Some(new_instance) => instance = Either::First(new_instance),
                         _ => {}
                     }
                 }
+                Ok(())
             },
             name,
-        );
+        )?;
+        Ok(())
     }
 
-    fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer], String) -> B, B>(
+    fn apply_to_all_variants_rec<F: Fn(&[ResolvedLayer], String) -> Result<B>, B>(
         prev: &[ResolvedLayer],
         coming: &mut VecDeque<Layer>,
         name: String,
         apply: &F,
-    ) -> Vec<B> {
+    ) -> Result<Vec<B>> {
         if coming.len() == 0 {
-            return vec![apply(prev, name)];
+            return Ok(vec![apply(prev, name)?]);
         }
 
         let mut resolved = coming.pop_front().unwrap().resolve(prev);
-        while resolved.len() == 0 {
+        while resolved.len() == 0 && coming.len() != 0 {
             resolved = coming.pop_front().unwrap().resolve(prev);
         }
 
-        resolved
+        Ok(resolved
             .into_iter()
             .enumerate()
-            .flat_map(|(index, resolved_layer)| {
+            .map(|(index, resolved_layer)| {
                 Self::apply_to_all_variants_rec(
                     &[prev, &[resolved_layer]].concat(),
                     &mut coming.clone(),
@@ -185,7 +188,10 @@ impl Profile {
                     apply,
                 )
             })
-            .collect()
+            .collect::<Result<Vec<Vec<B>>>>()?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 }
 
@@ -193,7 +199,7 @@ impl ResolvedLayer {
     pub fn apply(
         &self,
         instance: &Either<instance::Instance, PathBuf>,
-    ) -> Result<Option<instance::Instance>, Box<dyn Error>> {
+    ) -> Result<Option<instance::Instance>> {
         let path = match instance {
             Either::First(instance) => &instance.path,
             Either::Second(path) => path,
@@ -219,14 +225,14 @@ impl ResolvedLayer {
                     *loader,
                     loader_version.clone(),
                 )
-                .unwrap(),
+                .context("Error while trying to create instance")?,
             )),
             Self::DirectoryOverlay { source } => {
                 copy_dir_all(path.join(source), path)?;
                 Ok(None)
             }
             Self::ExecuteCommand(cmd) => {
-                if run_cmd(cmd, &path).status.success() {
+                if run_cmd(cmd, &path)?.status.success() {
                     return Ok(None);
                 }
                 return Err(EvaluationError {})?;
@@ -250,23 +256,23 @@ impl ResolvedLayer {
             }
         };
 
-        fn run_cmd(cmd: &String, path: &PathBuf) -> Output {
+        fn run_cmd(cmd: &String, path: &PathBuf) -> Result<Output> {
             if cfg!(target_os = "windows") {
                 Command::new("cmd")
                     .current_dir(path)
                     .args(["/C", cmd])
                     .output()
-                    .expect("failed to execute process")
+                    .context("failed to execute process")
             } else {
                 Command::new("sh")
                     .current_dir(path)
                     .arg("-c")
                     .arg(cmd)
                     .output()
-                    .expect("failed to execute process")
+                    .context("failed to execute process")
             }
         }
-        fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
+        fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
             fs::create_dir_all(&dst)?;
             for entry in fs::read_dir(src)? {
                 let entry = entry?;
@@ -293,7 +299,7 @@ pub struct EvaluationError {}
 impl Display for EvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "EvaluationError")?;
-        Ok(())
+        core::result::Result::Ok(())
     }
 }
 
