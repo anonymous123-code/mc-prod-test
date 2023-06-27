@@ -30,6 +30,7 @@ pub enum ModloaderDef {
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Layer {
+    DeleteDirectory(PathBuf),
     Instance {
         version: String,
         #[serde(with = "ModloaderDef")]
@@ -58,6 +59,7 @@ pub enum Layer {
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolvedLayer {
+    DeleteDirectory(PathBuf),
     Instance {
         version: String,
         #[serde(with = "ModloaderDef")]
@@ -77,6 +79,7 @@ pub enum ResolvedLayer {
 impl Layer {
     fn resolve(self, previous_layers: &[ResolvedLayer]) -> Vec<ResolvedLayer> {
         match self {
+            Self::DeleteDirectory(path) => vec![ResolvedLayer::DeleteDirectory(path)],
             Self::Instance {
                 version,
                 loader,
@@ -166,16 +169,23 @@ impl ResolvedLayer {
         &self,
         instance: &Either<instance::Instance, PathBuf>,
     ) -> Result<Option<instance::Instance>, Box<dyn Error>> {
+        let path = match instance {
+            Either::First(instance) => &instance.path,
+            Either::Second(path) => path,
+        };
         return match self {
+            Self::DeleteDirectory(target) => {
+                let full_target_path = path.join(target);
+                if full_target_path.is_dir() {
+                    fs::remove_dir_all(path)?;
+                }
+                Ok(None)
+            },
             Self::Instance {
                 version,
                 loader,
                 loader_version,
             } => {
-                let path = match instance {
-                    Either::First(instance) => &instance.path,
-                    Either::Second(path) => path,
-                };
                 Ok(Some(
                     instance::Instance::new(
                         path.file_name().unwrap().to_string_lossy().to_string(),
@@ -189,15 +199,11 @@ impl ResolvedLayer {
                 ))
             }
             Self::DirectoryOverlay { source } => {
-                let path = match instance {
-                    Either::First(instance) => &instance.path,
-                    Either::Second(path) => path,
-                };
                 copy_dir_all(path.join(source), path)?;
                 Ok(None)
             }
             Self::ExecuteCommand(cmd) => {
-                if run_cmd(cmd).status.success() {
+                if run_cmd(cmd, &path).status.success() {
                     return Ok(None);
                 }
                 return Err(EvaluationError {})?;
@@ -207,14 +213,16 @@ impl ResolvedLayer {
             }
         };
 
-        fn run_cmd(cmd: &String) -> Output {
+        fn run_cmd(cmd: &String, path: &PathBuf) -> Output {
             if cfg!(target_os = "windows") {
                 Command::new("cmd")
+                    .current_dir(path)
                     .args(["/C", cmd])
                     .output()
                     .expect("failed to execute process")
             } else {
                 Command::new("sh")
+                    .current_dir(path)
                     .arg("-c")
                     .arg(cmd)
                     .output()
