@@ -34,7 +34,7 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> 
     profile.name = name.clone();
     for variant in profile.clone().get_variants(name.clone() + "_") {
         println!("Preparing {variant:?}");
-        variant.prepare(profile_dir.join(&profile.name))?.run().await?;
+        variant.prepare(profile_dir.join(&profile.name))?.run().await?.wait().await?;
         println!("Successfully ran {}", name);
     }
     return Ok(());
