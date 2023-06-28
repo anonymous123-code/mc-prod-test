@@ -1,6 +1,6 @@
 use crate::config::ProfileConfig;
 use crate::layer;
-use anyhow::{Context, Ok, Result, bail};
+use anyhow::{bail, Context, Ok, Result};
 use helixlauncher_core::launch::instance;
 
 use crate::layer::Profile;
@@ -32,16 +32,11 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> 
         .context("Profile does not exist")?;
 
     profile.name = name.clone();
-    profile.clone().apply_to_all_variants(
-        |layers, _| {
-            println!("{layers:?}");
-            Ok(())
-        },
-        "".to_string(),
-    )?;
-
-    profile.clone().run(profile_dir.join(&profile.name))?;
-    println!("Successfully ran {}", name);
+    for variant in profile.clone().get_variants(name.clone() + "_") {
+        println!("Preparing {variant:?}");
+        variant.prepare(profile_dir.join(&profile.name))?.run().await?;
+        println!("Successfully ran {}", name);
+    }
     return Ok(());
 }
 
