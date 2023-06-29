@@ -214,7 +214,6 @@ impl LaunchOptions {
                     .world(world_name));
             }
         }
-        //let account = account_name.clone().map(|username| );
     }
 }
 
