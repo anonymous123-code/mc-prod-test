@@ -1,12 +1,15 @@
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::layer;
 use crate::{config::ProfileConfig, layer::PreparedVariant};
-use anyhow::{bail, Context, Ok, Result};
+use anyhow::{bail, Context, Ok, Result, ensure};
+use futures::future::try_join_all;
 use helixlauncher_core::auth::account::AccountConfig;
 use helixlauncher_core::launch::instance;
 use indicatif::ProgressBar;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::layer::Profile;
 
@@ -69,9 +72,45 @@ pub async fn run(
     let variants = futures::future::try_join_all(variants).await?;
     prepare_bar.finish();
 
+    let launch_bar = Arc::new(ProgressBar::new(variants.len().try_into().unwrap()));
+    launch_bar.enable_steady_tick(Duration::from_secs(1));
     for variant in variants {
-        variant.launch().await?.wait().await?;
+        let mut variant = variant;
+        variant.stderr = Stdio::piped();
+        variant.stdout = Stdio::piped();
+        let mut child = variant.launch().await?;
+        let stderr = tokio::task::spawn({
+            let launch_bar = launch_bar.clone();
+            let stderr = child.stderr.take().unwrap();
+            async move {
+                let mut stderr_reader = BufReader::new(stderr).lines();
+                while let Some(line) = stderr_reader.next_line().await? {
+                    launch_bar.suspend(|| println!("{line}"))
+                }
+                Ok(())
+            }
+        });
+        let stdout = tokio::task::spawn({
+            let launch_bar = launch_bar.clone();
+            let stdout = child.stdout.take().unwrap();
+            async move {
+                let mut stderr_reader = BufReader::new(stdout).lines();
+                while let Some(line) = stderr_reader.next_line().await? {
+                    launch_bar.suspend(|| eprintln!("{line}"))
+                }
+                Ok(())
+            }
+        });
+        let run = tokio::task::spawn({
+            async move {
+                ensure!(child.wait().await?.success(), "Error while running instance");
+                Ok(())
+            }
+        });
+        try_join_all(vec![run, stderr, stdout]).await?;
+        launch_bar.inc(1);
     }
+    launch_bar.finish();
     return Ok(());
 }
 
