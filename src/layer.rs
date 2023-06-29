@@ -202,12 +202,12 @@ impl LaunchOptions {
                             token: String::new(),
                             selected: true,
                         }))
-                        .context(""),
+                        .unwrap(),
                     None => accounts
                         .into_iter()
                         .find(|it| it.selected)
-                        .context("No selected account was found"),
-                }?;
+                        .context("No selected account was found")?,
+                };
                 todo!()
             }
         }
