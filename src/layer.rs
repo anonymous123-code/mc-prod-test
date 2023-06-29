@@ -1,15 +1,19 @@
-use anyhow::{Context, Ok, Result, bail};
+use anyhow::{bail, ensure, Context, Ok, Result};
 use either::Either;
-use helixlauncher_core::{launch::{instance, prepared::{LaunchOptions, prepare_launch}, asset::merge_components}, config::Config};
+use helixlauncher_core::{
+    auth::account::Account,
+    config::Config,
+    launch::{asset::merge_components, instance, prepared},
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::process::Child;
 use std::{
     collections::VecDeque,
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
+use tokio::process::Child;
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct Profile {
@@ -45,10 +49,7 @@ pub enum Layer {
         id: String,
         version: Option<String>,
     },
-    LaunchClient {
-        account_name: Option<String>,
-        world_name: Option<String>,
-    },
+    LaunchClient(LaunchOptions),
     ExecuteCommand(String),
     Variants(Vec<Layer>),
     IfPresent {
@@ -79,10 +80,7 @@ pub enum ResolvedLayer {
         version: Option<String>,
     },
     ExecuteCommand(String),
-    LaunchClient {
-        account_name: Option<String>,
-        world_name: Option<String>,
-    },
+    LaunchClient(LaunchOptions),
 }
 
 impl Layer {
@@ -103,13 +101,7 @@ impl Layer {
             }
             Self::ModrinthPack { id, version } => vec![ResolvedLayer::ModrinthPack { id, version }],
             Self::ExecuteCommand(command) => vec![ResolvedLayer::ExecuteCommand(command)],
-            Self::LaunchClient {
-                account_name,
-                world_name,
-            } => vec![ResolvedLayer::LaunchClient {
-                account_name,
-                world_name,
-            }],
+            Self::LaunchClient(launch_options) => vec![ResolvedLayer::LaunchClient(launch_options)],
             Self::Variants(variants) => variants
                 .into_iter()
                 .flat_map(|e| e.resolve(previous_layers))
@@ -140,14 +132,110 @@ pub struct Variant {
 
 pub struct PreparedVariant {
     instance: instance::Instance,
-    launch_options: LaunchOptions
+    launch_options: LaunchOptions,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+pub enum LaunchOptions {
+    Demo,
+    Offline {
+        account_name: Option<String>,
+        world_name: Option<String>,
+    },
+    Online {
+        account_name: Option<String>,
+        world_name: Option<String>,
+    },
+}
+
+impl Default for LaunchOptions {
+    fn default() -> Self {
+        Self::Online {
+            account_name: None,
+            world_name: None,
+        }
+    }
+}
+
+impl LaunchOptions {
+    fn into(self, accounts: Vec<Account>) -> Result<prepared::LaunchOptions> {
+        match self {
+            LaunchOptions::Demo => Ok(prepared::LaunchOptions::default()),
+            Self::Online {
+                account_name,
+                world_name: _,
+            } => {
+                ensure!(
+                    accounts.len() > 0,
+                    "Must be logged in to use non-demo accounts"
+                );
+                let _account = match account_name {
+                    Some(account_name) => accounts
+                        .iter()
+                        .find(|it| it.username == account_name)
+                        .context(format!(
+                            "No account with the name matching {account_name} was found"
+                        )),
+                    None => accounts
+                        .iter()
+                        .find(|it| it.selected)
+                        .context("No selected account was found"),
+                }?;
+                todo!()
+            }
+            Self::Offline {
+                account_name,
+                world_name: _,
+            } => {
+                ensure!(
+                    accounts.len() > 0,
+                    "Must be logged in to use non-demo accounts"
+                );
+                let _account = match account_name {
+                    Some(account_name) => accounts
+                        .into_iter()
+                        .find(|it| it.username == account_name)
+                        .or(Some(Account {
+                            username: account_name,
+                            uuid: "00000000-0000-0000-0000-000000000000".to_string(),
+                            refresh_token: String::new(),
+                            token: String::new(),
+                            selected: true,
+                        }))
+                        .context(""),
+                    None => accounts
+                        .into_iter()
+                        .find(|it| it.selected)
+                        .context("No selected account was found"),
+                }?;
+                todo!()
+            }
+        }
+        //let account = account_name.clone().map(|username| );
+    }
 }
 
 impl PreparedVariant {
-    pub async fn run(self) -> Result<Child> {
-        let config = Config::new_with_data_dir("dev.helixlauncher.HelixLauncher", "HelixLauncher", self.instance.path.clone().parent().unwrap().join(".helix_config"))?;
+    pub async fn run(self, accounts: Vec<Account>) -> Result<Child> {
+        let config = Config::new_with_data_dir(
+            "dev.helixlauncher.HelixLauncher",
+            "HelixLauncher",
+            self.instance
+                .path
+                .parent()
+                .unwrap()
+                .join(".helix_config"),
+        )?;
         let merged_components = merge_components(&config, &self.instance.config.components).await?;
-        Ok(prepare_launch(&config, &self.instance, &merged_components, self.launch_options).await?.launch(true).await?)
+        Ok(prepared::prepare_launch(
+            &config,
+            &self.instance,
+            &merged_components,
+            self.launch_options.into(accounts)?,
+        )
+        .await?
+        .launch(true)
+        .await?)
     }
 }
 
@@ -169,7 +257,12 @@ impl Variant {
                 }
             }
         }
-        Ok(PreparedVariant { instance: instance.left().context("No instance was generated by profile")?, launch_options })
+        Ok(PreparedVariant {
+            instance: instance
+                .left()
+                .context("No instance was generated by profile")?,
+            launch_options,
+        })
     }
 }
 
@@ -258,19 +351,8 @@ impl ResolvedLayer {
             Self::ModrinthPack { id: _, version: _ } => {
                 todo!("Modpack support")
             }
-            Self::LaunchClient {
-                account_name: _,
-                world_name: _,
-            } => {
-                todo!();
-                /*
-                match instance {
-                    Either::First(instance) => {
-                        join!(prepared::prepare_launch(Config::new(appid, name), instance, components, launch_options).await);
-                        Ok(None)
-                    }
-                    Either::Second(_) => Err()
-                }*/
+            Self::LaunchClient(launch_options) => {
+                return Ok((None, launch_options.clone()));
             }
         };
 
