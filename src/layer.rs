@@ -13,7 +13,6 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
 };
-use tokio::process::Child;
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct Profile {
@@ -163,35 +162,37 @@ impl LaunchOptions {
             LaunchOptions::Demo => Ok(prepared::LaunchOptions::default()),
             Self::Online {
                 account_name,
-                world_name: _,
+                world_name,
             } => {
                 ensure!(
                     accounts.len() > 0,
                     "Must be logged in to use non-demo accounts"
                 );
-                let _account = match account_name {
+                let account = match account_name {
                     Some(account_name) => accounts
-                        .iter()
+                        .into_iter()
                         .find(|it| it.username == account_name)
                         .context(format!(
                             "No account with the name matching {account_name} was found"
                         )),
                     None => accounts
-                        .iter()
+                        .into_iter()
                         .find(|it| it.selected)
                         .context("No selected account was found"),
                 }?;
-                todo!()
+                return Ok(prepared::LaunchOptions::default()
+                    .account(Some(account))
+                    .world(world_name));
             }
             Self::Offline {
                 account_name,
-                world_name: _,
+                world_name,
             } => {
                 ensure!(
                     accounts.len() > 0,
                     "Must be logged in to use non-demo accounts"
                 );
-                let _account = match account_name {
+                let account = match account_name {
                     Some(account_name) => accounts
                         .into_iter()
                         .find(|it| it.username == account_name)
@@ -208,7 +209,9 @@ impl LaunchOptions {
                         .find(|it| it.selected)
                         .context("No selected account was found")?,
                 };
-                todo!()
+                return Ok(prepared::LaunchOptions::default()
+                    .account(Some(account))
+                    .world(world_name));
             }
         }
         //let account = account_name.clone().map(|username| );
@@ -216,15 +219,11 @@ impl LaunchOptions {
 }
 
 impl PreparedVariant {
-    pub async fn run(self, accounts: Vec<Account>) -> Result<Child> {
+    pub async fn run(self, accounts: Vec<Account>) -> Result<prepared::PreparedLaunch> {
         let config = Config::new_with_data_dir(
             "dev.helixlauncher.HelixLauncher",
             "HelixLauncher",
-            self.instance
-                .path
-                .parent()
-                .unwrap()
-                .join(".helix_config"),
+            self.instance.path.parent().unwrap().join(".helix_config"),
         )?;
         let merged_components = merge_components(&config, &self.instance.config.components).await?;
         Ok(prepared::prepare_launch(
@@ -233,8 +232,6 @@ impl PreparedVariant {
             &merged_components,
             self.launch_options.into(accounts)?,
         )
-        .await?
-        .launch(true)
         .await?)
     }
 }

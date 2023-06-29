@@ -38,6 +38,8 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> 
             .prepare(profile_dir.join(&profile.name))?
             .run(vec![])
             .await?
+            .launch(true)
+            .await?
             .wait()
             .await?;
         println!("Successfully ran {}", name);
