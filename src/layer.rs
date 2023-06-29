@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Ok, Result};
 use either::Either;
 use helixlauncher_core::{
-    auth::account::Account,
+    auth::account::{Account, AccountConfig},
     config::Config,
     launch::{asset::merge_components, instance, prepared},
 };
@@ -157,7 +157,15 @@ impl Default for LaunchOptions {
 }
 
 impl LaunchOptions {
-    fn into(self, accounts: Vec<Account>) -> Result<prepared::LaunchOptions> {
+    fn into(self, account_config: AccountConfig) -> Result<prepared::LaunchOptions> {
+        fn take<T>(mut vec: Vec<T>, index: usize) -> Option<T> {
+            // Why?
+            if index < vec.len() {
+                Some(vec.swap_remove(index))
+            } else {
+                None
+            }
+        }
         match self {
             LaunchOptions::Demo => Ok(prepared::LaunchOptions::default()),
             Self::Online {
@@ -165,21 +173,20 @@ impl LaunchOptions {
                 world_name,
             } => {
                 ensure!(
-                    accounts.len() > 0,
+                    account_config.accounts.len() > 0,
                     "Must be logged in to use non-demo accounts"
                 );
                 let account = match account_name {
-                    Some(account_name) => accounts
+                    Some(account_name) => account_config
+                        .accounts
                         .into_iter()
                         .find(|it| it.username == account_name)
                         .context(format!(
                             "No account with the name matching {account_name} was found"
-                        )),
-                    None => accounts
-                        .into_iter()
-                        .find(|it| it.selected)
-                        .context("No selected account was found"),
-                }?;
+                        ))?,
+                    None => take(account_config.accounts, account_config.selected)
+                        .context("No selected account was found")?,
+                };
                 return Ok(prepared::LaunchOptions::default()
                     .account(Some(account))
                     .world(world_name));
@@ -189,11 +196,12 @@ impl LaunchOptions {
                 world_name,
             } => {
                 ensure!(
-                    accounts.len() > 0,
+                    account_config.accounts.len() > 0,
                     "Must be logged in to use non-demo accounts"
                 );
                 let account = match account_name {
-                    Some(account_name) => accounts
+                    Some(account_name) => account_config
+                        .accounts
                         .into_iter()
                         .find(|it| it.username == account_name)
                         .or(Some(Account {
@@ -201,12 +209,9 @@ impl LaunchOptions {
                             uuid: "00000000-0000-0000-0000-000000000000".to_string(),
                             refresh_token: String::new(),
                             token: String::new(),
-                            selected: true,
                         }))
                         .unwrap(),
-                    None => accounts
-                        .into_iter()
-                        .find(|it| it.selected)
+                    None => take(account_config.accounts, account_config.selected)
                         .context("No selected account was found")?,
                 };
                 return Ok(prepared::LaunchOptions::default()
@@ -218,7 +223,7 @@ impl LaunchOptions {
 }
 
 impl PreparedVariant {
-    pub async fn run(self, accounts: Vec<Account>) -> Result<prepared::PreparedLaunch> {
+    pub async fn run(self, accounts: AccountConfig) -> Result<prepared::PreparedLaunch> {
         let config = Config::new_with_data_dir(
             "dev.helixlauncher.HelixLauncher",
             "HelixLauncher",
@@ -236,12 +241,13 @@ impl PreparedVariant {
 }
 
 impl Variant {
-    pub fn prepare(self, base_directory: PathBuf) -> Result<PreparedVariant> {
+    pub async fn setup(self, base_directory: PathBuf) -> Result<PreparedVariant> {
         let mut instance = Either::Right(base_directory.join(self.name));
         let mut launch_options = LaunchOptions::default();
         for resolved in self.layers {
             match resolved
                 .apply(&instance, launch_options)
+                .await
                 .context("Error while preparing profile")?
             {
                 (Some(new_instance), new_launch_options) => {
@@ -299,7 +305,7 @@ impl Profile {
 }
 
 impl ResolvedLayer {
-    pub fn apply(
+    pub async fn apply(
         &self,
         instance: &Either<instance::Instance, PathBuf>,
         launch_options: LaunchOptions,

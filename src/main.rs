@@ -15,11 +15,11 @@ async fn main() -> Result<()> {
 
     let mut profile_config =
         config::ProfileConfig::read_or_create(profile_dir.join("profiles.json"))?;
-    let mut accounts = account::get_accounts(&profile_dir.join("accounts.json"))?;
+    let mut account_config = account::AccountConfig::new(profile_dir.join("accounts.json"))?;
     return match args.subcommand {
         Commands::Profile {
             command: ProfileCommands::Run { name },
-        } => command::profile::run(name, profile_config).await,
+        } => command::profile::run(name, profile_config, account_config).await,
         Commands::Profile {
             command: ProfileCommands::Create { name },
         } => command::profile::create(name, &mut profile_config).await,
@@ -28,13 +28,13 @@ async fn main() -> Result<()> {
         } => command::profile::switch(name, &mut profile_config).await,
         Commands::Account {
             command: AccountCommands::List,
-        } => command::account::list(&accounts).await,
+        } => command::account::list(&account_config).await,
         Commands::Account {
             command: AccountCommands::Add,
-        } => command::account::add(&mut accounts).await,
+        } => command::account::add(&mut account_config).await,
         Commands::Account {
             command: AccountCommands::Switch { name },
-        } => command::account::switch(name, &mut accounts).await,
+        } => command::account::switch(name, &mut account_config).await,
         // Commands::Login => {todo!()}
         Commands::Schema => {
             println!(

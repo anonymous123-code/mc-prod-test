@@ -1,11 +1,20 @@
-use crate::config::ProfileConfig;
+use std::sync::Arc;
+use std::time::Duration;
+
 use crate::layer;
+use crate::{config::ProfileConfig, layer::PreparedVariant};
 use anyhow::{bail, Context, Ok, Result};
+use helixlauncher_core::auth::account::AccountConfig;
 use helixlauncher_core::launch::instance;
+use indicatif::ProgressBar;
 
 use crate::layer::Profile;
 
-pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> {
+pub async fn run(
+    name: Option<String>,
+    mut config: ProfileConfig,
+    account_config: AccountConfig,
+) -> Result<()> {
     let profile_dir = config.path.parent().unwrap();
     let name = match name {
         Some(name) => name,
@@ -30,19 +39,38 @@ pub async fn run(name: Option<String>, mut config: ProfileConfig) -> Result<()> 
         .profiles
         .get_mut(&name)
         .context("Profile does not exist")?;
-
+    let variants = profile.clone().get_variants(name.clone() + "_");
+    let setup_bar = Arc::new(ProgressBar::new(variants.len().try_into().unwrap()));
     profile.name = name.clone();
-    for variant in profile.clone().get_variants(name.clone() + "_") {
-        println!("Preparing {variant:?}");
-        variant
-            .prepare(profile_dir.join(&profile.name))?
-            .run(vec![])
-            .await?
-            .launch(true)
-            .await?
-            .wait()
-            .await?;
-        println!("Successfully ran {}", name);
+    let variants = variants.into_iter().map(|it: layer::Variant| {
+        let path = profile_dir.join(&profile.name);
+        let setup_bar = setup_bar.clone();
+        async move {
+            let result: PreparedVariant = it.setup(path).await?;
+            setup_bar.inc(1);
+            Ok::<PreparedVariant>(result)
+        }
+    });
+    let variants = futures::future::try_join_all(variants).await?;
+    setup_bar.finish();
+
+    let prepare_bar = Arc::new(ProgressBar::new(variants.len().try_into().unwrap()));
+    prepare_bar.enable_steady_tick(Duration::from_secs(1));
+    profile.name = name.clone();
+    let variants = variants.into_iter().map(|it| {
+        let prepare_bar = prepare_bar.clone();
+        let account_config = account_config.clone();
+        async move {
+            let result = it.run(account_config).await?;
+            prepare_bar.inc(1);
+            Ok(result)
+        }
+    });
+    let variants = futures::future::try_join_all(variants).await?;
+    prepare_bar.finish();
+
+    for variant in variants {
+        variant.launch().await?.wait().await?;
     }
     return Ok(());
 }

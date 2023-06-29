@@ -10,7 +10,9 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 clap = { version = "4.3.8", features = ["derive"] }
 dialoguer = { version = "0.10.4", features = ["fuzzy-select", "history"] }
 either = "1.8.1"
-helixlauncher-core = { git="https://github.com/HelixLauncher/HelixLauncher" }
+futures = "0.3.28"
+helixlauncher-core = { git="https://github.com/anonymous123-code/HelixLauncher", branch="applied-patches" }
+indicatif = "0.17.5"
 schemars = "0.8.12"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.99"
