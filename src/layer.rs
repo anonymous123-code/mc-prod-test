@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Ok, Result};
 use either::Either;
 use helixlauncher_core::{
-    auth::account::{Account, AccountConfig},
+    auth::account::AccountConfig,
     config::Config,
     launch::{asset::merge_components, instance, prepared},
 };
@@ -157,15 +157,7 @@ impl Default for LaunchOptions {
 }
 
 impl LaunchOptions {
-    fn into(self, account_config: AccountConfig) -> Result<prepared::LaunchOptions> {
-        fn take<T>(mut vec: Vec<T>, index: usize) -> Option<T> {
-            // Why?
-            if index < vec.len() {
-                Some(vec.swap_remove(index))
-            } else {
-                None
-            }
-        }
+    fn into<'a>(self, account_config: &'a AccountConfig) -> Result<prepared::LaunchOptions<'a>> {
         match self {
             LaunchOptions::Demo => Ok(prepared::LaunchOptions::default()),
             Self::Online {
@@ -179,12 +171,13 @@ impl LaunchOptions {
                 let account = match account_name {
                     Some(account_name) => account_config
                         .accounts
-                        .into_iter()
+                        .iter()
                         .find(|it| it.username == account_name)
                         .context(format!(
                             "No account with the name matching {account_name} was found"
                         ))?,
-                    None => take(account_config.accounts, account_config.selected)
+                    None => account_config
+                        .selected()
                         .context("No selected account was found")?,
                 };
                 return Ok(prepared::LaunchOptions::default()
@@ -192,31 +185,38 @@ impl LaunchOptions {
                     .world(world_name));
             }
             Self::Offline {
-                account_name,
-                world_name,
+                account_name: _,
+                world_name: _,
             } => {
-                ensure!(
-                    account_config.accounts.len() > 0,
-                    "Must be logged in to use non-demo accounts"
-                );
-                let account = match account_name {
-                    Some(account_name) => account_config
-                        .accounts
-                        .into_iter()
-                        .find(|it| it.username == account_name)
-                        .or(Some(Account {
-                            username: account_name,
-                            uuid: "00000000-0000-0000-0000-000000000000".to_string(),
-                            refresh_token: String::new(),
-                            token: String::new(),
-                        }))
-                        .unwrap(),
-                    None => take(account_config.accounts, account_config.selected)
-                        .context("No selected account was found")?,
-                };
-                return Ok(prepared::LaunchOptions::default()
-                    .account(Some(account))
-                    .world(world_name));
+                todo!();
+                // ensure!(
+                //     account_config.accounts.len() > 0,
+                //     "Must be logged in to use non-demo accounts"
+                // );
+                // let mut dummy = None;
+                // let account = match account_name {
+                //     Some(account_name) => {
+                //         let account = Account {
+                //             username: account_name.clone(),
+                //             uuid: "00000000-0000-0000-0000-000000000000".to_string(),
+                //             refresh_token: String::new(),
+                //             token: String::new(),
+                //         };
+                //         dummy = Some(account);
+                //         let account_ref = dummy.as_ref().unwrap();
+                //         account_config
+                //         .accounts
+                //         .iter()
+                //         .find(|it| it.username == account_name)
+                //         .or(Some(account_ref))
+                //         .unwrap()
+                //     }
+                //     None => account_config.selected()
+                //         .context("No selected account was found")?,
+                // };
+                // Ok((prepared::LaunchOptions::default()
+                //     .account(Some(account))
+                //     .world(world_name), dummy))
             }
         }
     }
@@ -234,7 +234,7 @@ impl PreparedVariant {
             &config,
             &self.instance,
             &merged_components,
-            self.launch_options.into(accounts)?,
+            self.launch_options.into(&accounts)?,
         )
         .await?)
     }
